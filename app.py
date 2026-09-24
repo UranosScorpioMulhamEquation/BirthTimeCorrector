@@ -37,8 +37,6 @@ PLANETS = {
     'Pluto': swe.PLUTO, 'Rahu': swe.TRUE_NODE
 }
 
-OUTER_PLANETS = ['Uranus', 'Neptune', 'Pluto']
-
 ZODIAC_NAMES = [
     "الحمل", "الثور", "الجوزاء", "السرطان", 
     "الأسد", "العذراء", "الميزان", "العقرب", 
@@ -46,18 +44,12 @@ ZODIAC_NAMES = [
 ]
 
 def get_base_utc_offset(date_obj, lat, lon):
-    """حساب الفارق الزمني القياسي للدولة من الخريطة الجغرافية"""
+    """حساب الفارق الزمني القياسي للدولة من الخريطة الجغرافية بدون توقيت صيفي"""
     tz_str = tf.timezone_at(lng=lon, lat=lat) or "UTC"
     local_tz = pytz.timezone(tz_str)
     dt_unaware = datetime.datetime.combine(date_obj, datetime.time(12, 0))
     loc_dt = local_tz.localize(dt_unaware, is_dst=False)
     return loc_dt.utcoffset().total_seconds() / 3600.0
-
-def get_utc_julian_day(date_obj, time_obj, utc_offset_hours):
-    """تحويل الوقت المحلي المباشر إلى UTC ومن ثم التاريخ الجولياني"""
-    dt = datetime.datetime.combine(date_obj, time_obj)
-    utc_dt = dt - datetime.timedelta(hours=utc_offset_hours)
-    return swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, utc_dt.hour + utc_dt.minute/60.0 + utc_dt.second/3600.0)
 
 def find_exact_solar_return_utc(target_year, natal_sun_lon, birth_month, birth_day, utc_birth_dt):
     """حساب لحظة العودة الشمسية الدقيقة بالاعتماد المباشر على التوقيت العالمي UTC"""
@@ -85,43 +77,32 @@ def get_house_of_planet(p_lon, cusps):
     return 1
 
 def check_midpoint_activation(sr_planets, midpoint_lon):
-    axis_longitudes = [(midpoint_lon + k * 90) % 360 for k in range(4)]
+    """تحقق من تفعيل الميد بوينت: الكوكب السنوي في نفس البرج وبفرق أقل من درجتين لكل الكواكب"""
+    midpoint_sign = int(midpoint_lon / 30)
     activated_planets = []
+    
     for p_name, p_data in sr_planets.items():
         p_lon = p_data['lon']
-        orb = 3.0 if p_name in OUTER_PLANETS else 2.0
+        p_sign = p_data['sign']
         
-        for target_lon in axis_longitudes:
-            diff = abs(p_lon - target_lon)
-            if diff > 180: diff = 360 - diff
-            if diff <= orb:
-                sign_idx = int(p_lon / 30)
+        if p_sign == midpoint_sign:
+            diff = abs(p_lon - midpoint_lon)
+            if diff < 2.0:
                 deg_in_sign = p_lon % 30
-                p_label = "أورانوس/نبتون/بلوتو" if p_name in OUTER_PLANETS else "كواكب/نقاط أخرى"
-                activated_planets.append(f"{p_name} ({p_label}) في {deg_in_sign:.1f}° {ZODIAC_NAMES[sign_idx]} [فرق: {diff:.1f}°]")
-                break
+                activated_planets.append(f"{p_name} في {deg_in_sign:.1f}° {ZODIAC_NAMES[p_sign]} [فرق: {diff:.1f}°]")
+                
     return activated_planets
 
-def is_before_cusp(p_lon, cusp_lon, orb=6):
+def is_before_cusp(p_lon, cusp_lon, orb=3): # تم التعديل إلى 3 درجات
     return ((cusp_lon - p_lon) % 360) <= orb
 
 # --- واجهة المستخدم ---
 st.title("🔍 أداة تصحيح ساعة الميلاد بواسطة واقعة الزواج")
-st.caption("برمجة الفلكي و المبرمج الدكتور ملهم أحمد")
+st.caption("برمجة الفلكي و المبرمج الدكتور ملهم أحمد - دقة الأداة +/- 15 دقيقة عن توقيت الميلاد")
 st.markdown("---")
 
 st.sidebar.header("إعدادات البحث والتصحيح")
 marriage_date = st.sidebar.date_input("تاريخ الزواج الفعلي المؤكد", value=datetime.date(2020, 1, 1), min_value=datetime.date(1960, 1, 1))
-
-# تم إخفاء شريط الدلالات وتثبيته تلقائياً على 3 دلالات
-min_dallalat = 3
-
-# خياران للتوقيت
-tz_option = st.sidebar.radio(
-    "خيار التوقيت المحلي لبلد الميلاد:",
-    options=["توقيت حسب المنطقة العالمية (افتراضي)", "توقيت صيفي (+1 ساعة إضافية)"],
-    index=0
-)
 
 col1, col2, col3 = st.columns(3)
 
@@ -132,8 +113,8 @@ with col1:
     st.markdown("### البيانات الشخصية")
     name = st.text_input("الاسم", "New Name")
     birth_date = st.date_input("تاريخ الميلاد", value=datetime.date(1990, 1, 1))
-    start_search_time = st.time_input("بداية نطاق البحث الزمني", value=datetime.time(10, 30), step=datetime.timedelta(minutes=15))
-    end_search_time = st.time_input("نهاية نطاق البحث الزمني (أقصاه ساعتين)", value=datetime.time(12, 30), step=datetime.timedelta(minutes=15))
+    expected_time = st.time_input("وقت الميلاد المتوقع", value=datetime.time(12, 0))
+    st.info("سيتم فحص نطاق زمني تلقائي (نصف ساعة قبل ونصف ساعة بعد الوقت المتوقع).")
 
 with col2:
     st.markdown("### مكان الميلاد")
@@ -156,38 +137,24 @@ with col3:
 run_rectification = st.button("بدء عملية تصحيح وقت الميلاد", type="primary")
 
 if run_rectification:
-    start_dt_dummy = datetime.datetime.combine(datetime.date.today(), start_search_time)
-    end_dt_dummy = datetime.datetime.combine(datetime.date.today(), end_search_time)
-    if end_dt_dummy < start_dt_dummy:
-        end_dt_dummy += datetime.timedelta(days=1)
-    
-    if (end_dt_dummy - start_dt_dummy).total_seconds() > 7200:
-        st.error("نطاق البحث الزمني يتجاوز ساعتين. يرجى تضييق النطاق لتسريع عملية البحث الدقيقة.")
-        st.stop()
-
     b_city_obj = next((c for c in b_city_objects if c['name'] == b_city_name), None)
     sr_city_obj = next((c for c in sr_city_objects if c['name'] == sr_city_name), None)
     
     b_lat, b_lon = (b_city_obj['latitude'], b_city_obj['longitude']) if b_city_obj else (35.1314, 36.7578)
     sr_lat, sr_lon = (sr_city_obj['latitude'], sr_city_obj['longitude']) if sr_city_obj else (24.4667, 54.3667)
         
-    base_offset = get_base_utc_offset(birth_date, b_lat, b_lon)
-    if tz_option == "توقيت صيفي (+1 ساعة إضافية)":
-        final_utc_offset = base_offset + 1.0
-    else:
-        final_utc_offset = base_offset
+    final_utc_offset = get_base_utc_offset(birth_date, b_lat, b_lon)
+    st.info(f"**الفارق الزمني المعتمد للتطبيق (بدون توقيت صيفي):** UTC{'+' if final_utc_offset>=0 else ''}{final_utc_offset:g} ساعة")
 
-    st.info(f"**الفارق الزمني المعتمد للتطبيق:** UTC{'+' if final_utc_offset>=0 else ''}{final_utc_offset:g} ساعة ({tz_option})")
-
-    curr_dt = datetime.datetime.combine(birth_date, start_search_time)
-    end_dt = datetime.datetime.combine(birth_date, end_search_time)
-    if end_dt < curr_dt:
-        end_dt += datetime.timedelta(days=1)
+    expected_dt = datetime.datetime.combine(birth_date, expected_time)
+    start_dt = expected_dt - datetime.timedelta(minutes=30)
+    end_dt = expected_dt + datetime.timedelta(minutes=30)
     
     time_step_seconds = 10 
-    candidate_times = []
+    candidate_dts = []
+    curr_dt = start_dt
     while curr_dt <= end_dt:
-        candidate_times.append(curr_dt.time())
+        candidate_dts.append(curr_dt)
         curr_dt += datetime.timedelta(seconds=time_step_seconds)
         
     matching_results = []
@@ -196,13 +163,12 @@ if run_rectification:
     
     marriage_year = marriage_date.year
 
-    for idx, cand_time in enumerate(candidate_times):
+    for idx, cand_dt in enumerate(candidate_dts):
         if idx % 100 == 0:
-            progress_bar.progress((idx + 1) / len(candidate_times))
-            status_text.text(f"جاري الفحص... الوقت الحالي: {cand_time.strftime('%H:%M:%S')}")
+            progress_bar.progress((idx + 1) / len(candidate_dts))
+            status_text.text(f"جاري الفحص... الوقت الحالي: {cand_dt.strftime('%H:%M:%S')}")
         
-        local_dt = datetime.datetime.combine(birth_date, cand_time)
-        utc_birth_dt = local_dt - datetime.timedelta(hours=final_utc_offset)
+        utc_birth_dt = cand_dt - datetime.timedelta(hours=final_utc_offset)
         jd_birth = swe.julday(utc_birth_dt.year, utc_birth_dt.month, utc_birth_dt.day, utc_birth_dt.hour + utc_birth_dt.minute/60.0 + utc_birth_dt.second/3600.0)
         
         natal_sun = swe.calc_ut(jd_birth, swe.SUN)[0][0]
@@ -284,18 +250,19 @@ if run_rectification:
         for p_name in target_planets:
             p_lon = sr_planets[p_name]['lon']
             for cusp_idx, cusp in enumerate(target_cusps):
-                if is_before_cusp(p_lon, cusp, orb=6):
+                if is_before_cusp(p_lon, cusp, orb=3): # استخدام الأورب 3 درجات
                     house_num = 1 if cusp_idx==0 else (4 if cusp_idx==1 else (5 if cusp_idx==2 else (7 if cusp_idx==3 else 10)))
                     cusp_contacts.append(f"{p_name} قبل وتد البيت {house_num}")
                     break
                     
         if cusp_contacts:
             dallalat_count += 1
-            details.append(f"10. اتصال أدلة الزواج بأوتاد السنوية: ({', '.join(cusp_contacts)})")
+            details.append(f"10. اتصال أدلة الزواج بأوتاد السنوية بـ 3 درجات فأقل: ({', '.join(cusp_contacts)})")
 
-        if dallalat_count >= min_dallalat:
+        # إظهار النتائج التي تفوق 4 دلالات
+        if dallalat_count > 4:
             matching_results.append({
-                "time": cand_time.strftime("%H:%M:%S"),
+                "time": cand_dt.strftime("%H:%M:%S"),
                 "natal_asc": f"{natal_cusps[0]%30:.1f}° {ZODIAC_NAMES[int(natal_cusps[0]/30)]}",
                 "dallalat": dallalat_count,
                 "midpoint_acts": act_midpoint,
@@ -314,7 +281,7 @@ if run_rectification:
         st.success("تم العثور على وقت الميلاد المقترح الذي يحقق أعلى عدد من دلالات الزواج وشرط الميد بوينت.")
         
         st.write(f"### ⏰ وقت الميلاد المقترح: **`{best_match['time']}`**")
-        st.write(f"**عدد الدلالات المتحققة:** {best_match['dallalat']} من 10 (الحد الأدنى المطلوب: {min_dallalat})")
+        st.write(f"**عدد الدلالات المتحققة:** {best_match['dallalat']} من 10 (الحد الأدنى المطلوب: 5)")
         st.write(f"**طالع الميلاد عند هذا الوقت:** {best_match['natal_asc']}")
         
         st.markdown("#### 📌 الكواكب المفعلة للميد بوينت:")
@@ -325,4 +292,4 @@ if run_rectification:
         for d in best_match['details']:
             st.write(f"- {d}")
     else:
-        st.warning(f"لم يتم العثور على أي وقت ميلاد ضمن النطاق المحدد يحقق تفعيل الميد بوينت و {min_dallalat} دلالات على الأقل.")
+        st.warning("لم يتم العثور على أي وقت ميلاد ضمن النطاق المحدد يحقق تفعيل الميد بوينت وتجاوز 4 دلالات زواج على الأقل.")
